@@ -4,15 +4,9 @@ declare(strict_types=1);
 
 namespace Tetthys\ClaimDispatch\Contracts;
 
-/**
- * Minimal boundary for pushing jobs to any queue/executor.
- */
+/** Minimal dispatcher boundary. */
 interface JobDispatcherInterface
 {
-    /**
-     * Dispatch many jobs at once (batch-friendly).
-     *
-     * @return int Number of jobs accepted by the backend.
-     */
+    /** Dispatch many jobs at once; return accepted count. */
     public function dispatchMany(iterable $jobs): int;
 }
