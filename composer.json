@@ -1,0 +1,24 @@
+{
+  "name": "tetthys/claim-dispatch",
+  "description": "Minimal contracts for claim→process→dispatch scheduling pipelines (framework-agnostic).",
+  "type": "library",
+  "license": "MIT",
+  "authors": [
+    {"name": "Tetthys", "email": "dev@example.com"}
+  ],
+  "require": {
+    "php": ">=8.1"
+  },
+  "autoload": {
+    "psr-4": {
+      "Tetthys\\ClaimDispatch\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Tetthys\\ClaimDispatch\\Tests\\": "tests/"
+    }
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}
