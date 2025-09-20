@@ -12,6 +12,7 @@
 - **Processors** – type-based mapping from log row → Job
 - **Idempotent jobs** – designed for safe re-execution
 - **Universal publisher** – domain-agnostic, higher-order & fluent
+- **Publisher Facade** – simple static API: `Publisher::quick(...)`
 - **Configurable** – add your own processors, rules, and evaluation logic
 
 ---
@@ -76,19 +77,23 @@ Register it in `config/claim-dispatch.php`:
 
 ### 2. Publish an Action Log
 
-Use the **universal publisher**. Two options:
-
-#### Higher-order builder (most flexible)
+#### 👉 Using the Facade (recommended)
 
 ```php
-use Tetthys\ClaimDispatch\Contracts\ActionLogPublisherInterface;
+use Publisher;
 
-/** @var ActionLogPublisherInterface $publisher */
-$publisher = app(ActionLogPublisherInterface::class);
+// One-liner (quick)
+Publisher::quick('email.welcome', now()->addMinutes(5), [
+    'user_email' => $user->email,
+    'user_name'  => $user->name,
+], [
+    'idempotency' => 'welcome:' . $user->id,
+]);
 
-$publisher->publish(function (\Tetthys\ClaimDispatch\Publishing\Draft $d) use ($user) {
+// Higher-order builder
+Publisher::publish(function (\Tetthys\ClaimDispatch\Publishing\Draft $d) use ($user) {
     $d->type('email.welcome')
-      ->eligibleAt(now()->addMinutes(5)) // send after 5 minutes
+      ->eligibleAt(now()->addMinutes(5))
       ->payload([
           'user_email' => $user->email,
           'user_name'  => $user->name,
@@ -97,16 +102,13 @@ $publisher->publish(function (\Tetthys\ClaimDispatch\Publishing\Draft $d) use ($
 });
 ```
 
-#### Quick one-liner
-
-```php
-$publisher->quick(
-    type: 'email.welcome',
-    eligibleAt: now()->addMinutes(5),
-    payload: ['user_email' => $user->email, 'user_name' => $user->name],
-    options: ['idempotency' => 'welcome:' . $user->id]
-);
-```
+> Facade `Publisher` is available if you add
+>
+> ```php
+> 'Publisher' => \Tetthys\ClaimDispatch\Laravel\Facades\Publisher::class,
+> ```
+>
+> to your `config/app.php` aliases (or rely on auto-discovery).
 
 ---
 
