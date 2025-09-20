@@ -1,5 +1,5 @@
 <?php
-// src/Laravel/Repositories/EloquentLogRepository.php
+
 declare(strict_types=1);
 
 namespace Tetthys\ClaimDispatch\Laravel\Repositories;

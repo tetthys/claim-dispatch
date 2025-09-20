@@ -1,5 +1,5 @@
 <?php
-// src/Contracts/JobDispatcherInterface.php
+
 declare(strict_types=1);
 
 namespace Tetthys\ClaimDispatch\Contracts;

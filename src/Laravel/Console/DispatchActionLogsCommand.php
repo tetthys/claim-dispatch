@@ -1,5 +1,5 @@
 <?php
-// src/Laravel/Console/DispatchActionLogsCommand.php
+
 declare(strict_types=1);
 
 namespace Tetthys\ClaimDispatch\Laravel\Console;

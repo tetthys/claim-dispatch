@@ -1,23 +1,18 @@
 # tetthys/claim-dispatch
 
-Minimal **contracts + Laravel adapter** for the common **claim → process → dispatch** scheduling pipeline.
+> **Atomic claim-dispatch framework for Laravel**  
+> Safely schedule and dispatch jobs from a single action log table.
 
 ---
 
-## ✨ What is this?
+## ✨ Features
 
-This package abstracts a very common pattern:
-
-> A user action writes a log into DB →  
-> A scheduler claims logs due at `end_at` →  
-> Each log is turned into a Job →  
-> Jobs are dispatched into the queue →  
-> The cycle repeats safely, without duplication.
-
-With this package you get:
-
-- **Contracts only (framework-agnostic)** → `src/Contracts`
-- **Built-in Laravel adapter** → Eloquent repository, Bus dispatcher, Artisan command, ServiceProvider, config & migration stubs
+- **Single table** (`action_logs`) as a durable schedule
+- **Atomic claim** – prevent duplicate dispatch across workers
+- **Processors** – type-based mapping from log row → Job
+- **Idempotent jobs** – designed for safe re-execution
+- **Universal publisher** – domain-agnostic, higher-order & fluent
+- **Configurable** – add your own processors, rules, and evaluation logic
 
 ---
 
@@ -27,7 +22,7 @@ With this package you get:
 composer require tetthys/claim-dispatch
 ````
 
-Publish config and migration, then migrate:
+Publish config and migration:
 
 ```bash
 php artisan vendor:publish --tag=claim-dispatch-config
@@ -37,140 +32,161 @@ php artisan migrate
 
 ---
 
-## ⚙️ Configuration
+## ⚡ Quick Start
 
-`config/claim-dispatch.php`:
+### 1. Define a Processor
 
-```php
-return [
-    'processors' => [
-        \App\Processors\OrderExpireProcessor::class,
-        \App\Processors\UserRemindProcessor::class,
-    ],
-    'default_limit' => 1000,
-    'table' => 'action_logs',
-];
-```
-
-* **processors** → list of classes implementing `LogProcessorInterface`
-* **default\_limit** → number of logs per scheduler run
-* **table** → DB table name for action logs (default: `action_logs`)
-
----
-
-## 🗄️ Database
-
-Migration creates a table like:
-
-```sql
-CREATE TABLE action_logs (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    type VARCHAR(120) NOT NULL,
-    payload JSON NOT NULL,
-    end_at TIMESTAMP NOT NULL,
-    claimed_at TIMESTAMP NULL,
-    processed_at TIMESTAMP NULL,
-    fail_count INT DEFAULT 0,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP
-);
-```
-
----
-
-## 🔌 Contracts
-
-Located in `Tetthys\ClaimDispatch\Contracts`:
-
-* `LogRecordInterface` → immutable view of a log row
-* `LogRepositoryInterface` → claim due & mark processed
-* `LogProcessorInterface` → supports(type) + toJob(record)
-* `JobDispatcherInterface` → dispatchMany(jobs)
-* `SchedulerInterface` → runOnce(until, limit): report
-
----
-
-## 🚀 Laravel Usage
-
-### 1. Create Processors
+Processors map `action_logs.type` to a Job.
 
 ```php
+<?php
+// app/Processors/SellerTryProcessor.php
+
 namespace App\Processors;
 
-use Tetthys\ClaimDispatch\Contracts\{LogProcessorInterface, LogRecordInterface};
-use App\Jobs\ExpireOrderJob;
+use Tetthys\ClaimDispatch\Contracts\LogProcessorInterface;
+use Tetthys\ClaimDispatch\Contracts\LogRecordInterface;
+use App\Jobs\CheckSellerTry;
 
-class OrderExpireProcessor implements LogProcessorInterface
+final class SellerTryProcessor implements LogProcessorInterface
 {
     public function supports(string $type): bool
     {
-        return $type === 'order.expire';
+        return $type === 'seller.try';
     }
 
     public function toJob(LogRecordInterface $record): object
     {
-        return new ExpireOrderJob($record->getId(), $record->getPayload()['order_id']);
+        $p = $record->getPayload();
+        return new CheckSellerTry((string) ($p['seller_try_id'] ?? ''));
     }
 }
 ```
 
-### 2. Register in config
+Register it in `config/claim-dispatch.php`:
 
 ```php
 'processors' => [
-    \App\Processors\OrderExpireProcessor::class,
+    App\Processors\SellerTryProcessor::class,
 ],
 ```
 
-### 3. Run the Scheduler
+---
 
-```bash
-php artisan claim-dispatch:run --limit=500
-```
+### 2. Publish an Action Log
 
-Or add to `App\Console\Kernel`:
+Use the **universal publisher**. Two options:
+
+#### Higher-order builder (most flexible)
 
 ```php
-$schedule->command('claim-dispatch:run')->everyMinute();
+use Tetthys\ClaimDispatch\Contracts\ActionLogPublisherInterface;
+
+/** @var ActionLogPublisherInterface $publisher */
+$publisher = app(ActionLogPublisherInterface::class);
+
+$publisher->publish(function (\Tetthys\ClaimDispatch\Publishing\Draft $d) use ($sellerTry) {
+    $d->type('seller.try')
+      ->eligibleAt($sellerTry->end_at) // stored in end_at
+      ->payload([
+          'seller_try_id' => (string) $sellerTry->id,
+          'user_id'       => $sellerTry->user_id,
+          'state'         => $sellerTry->state,
+          'amount'        => (string) $sellerTry->crypto_amount,
+      ])
+      ->rules([
+          'eq'  => [['path' => 'state',  'value' => 'ready']],
+          'gte' => [['path' => 'amount', 'value' => '0.01']],
+      ])
+      ->idempotency((string) $sellerTry->id);
+});
+```
+
+#### Quick one-liner
+
+```php
+$publisher->quick('featured.try', $featuredTry->end_at, [
+    'featured_try_id' => (string) $featuredTry->id,
+    'user_id'         => $featuredTry->user_id,
+], [
+    'rules'       => ['gte' => [['path' => 'slot', 'value' => 1]]],
+    'idempotency' => (string) $featuredTry->id,
+    'when'        => fn (array $p) => !empty($p['featured_try_id']),
+]);
 ```
 
 ---
 
-## 🧪 Flow Summary
+### 3. Run the Scheduler
 
+Add to `app/Console/Kernel.php`:
+
+```php
+protected function schedule(\Illuminate\Console\Scheduling\Schedule $schedule): void
+{
+    $schedule->command('claim-dispatch:run --limit=1000')->everyMinute();
+}
 ```
-Scheduler::runOnce(now(), 1000)
-    → EloquentLogRepository::claimDue()
-    → For each record: Processor::toJob()
-    → LaravelJobDispatcher::dispatchMany()
-    → markProcessed()
+
+Start a queue worker:
+
+```bash
+php artisan queue:work
 ```
 
 ---
 
-## 📝 Example Log Lifecycle
+## 🧩 How It Works
 
-1. Insert row into `action_logs`:
+1. **Publish**
+   Insert a row into `action_logs` with:
 
-   ```sql
-   INSERT INTO action_logs (type, payload, end_at, created_at, updated_at)
-   VALUES ('order.expire', '{"order_id":123}', NOW() + INTERVAL 1 MINUTE, NOW(), NOW());
-   ```
-2. At the due time, scheduler claims row.
-3. Processor builds `ExpireOrderJob`.
-4. Dispatcher queues the job.
-5. Repository marks the log as processed.
+   * `type` = routing key (e.g. `seller.try`)
+   * `payload` = JSON data (IDs, extra fields)
+   * `end_at` = earliest eligible time
+
+2. **Scheduler**
+   Runs every minute (or via cron).
+   Atomically claims rows (`end_at <= now() AND claimed_at IS NULL`) and dispatches them to processors.
+
+3. **Processor → Job**
+   Each processor transforms the record into a Laravel Job.
+   Jobs must be **idempotent**.
+
+4. **Execution**
+   Queue workers handle the jobs.
+   After success, the row is marked `processed_at`.
 
 ---
 
-## 🔒 Guarantees
+## ✅ Example Workflow
 
-* **Atomic claiming** (using `SELECT ... FOR UPDATE`)
-* **No duplicate dispatch** (claimed\_at / processed\_at markers)
-* **Idempotent job handling** if you check `logId` before side effects
+* A `SellerTry` model is created with an `end_at` deadline.
+* Publisher writes a `seller.try` action log row with its ID.
+* Scheduler claims it when due and dispatches a `CheckSellerTry` job.
+* The job finalizes the attempt, checks deposits, emits events.
+* Safe from duplication even under concurrency.
 
 ---
 
-## 📄 License
+## 🔧 Advanced
+
+* **Rules & Gates**
+
+  * `rules([...])`: store declarative predicates in payload (`__rules`).
+  * `when(fn ($payload) => ...)`: only insert if predicate passes.
+  * `skipIf(fn ($payload) => ...)`: skip insert if predicate passes.
+  * Processors can evaluate `__rules` as a second guard.
+
+* **Idempotency**
+  Provide a stable key with `idempotency($key)`.
+  Prevents duplicate rows for the same logical event.
+
+* **Multiple domains**
+  Just add more processors (`featured.try`, `address.try`, …).
+
+---
+
+## 📖 License
 
 MIT

@@ -1,5 +1,5 @@
 <?php
-// src/Laravel/Models/ActionLog.php
+
 declare(strict_types=1);
 
 namespace Tetthys\ClaimDispatch\Laravel\Models;

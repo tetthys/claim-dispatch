@@ -1,5 +1,5 @@
 <?php
-// src/Laravel/Data/ActionLogRecord.php
+
 declare(strict_types=1);
 
 namespace Tetthys\ClaimDispatch\Laravel\Data;

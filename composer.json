@@ -2,6 +2,8 @@
   "name": "tetthys/claim-dispatch",
   "description": "Minimal contracts for claim→process→dispatch pipelines, with built-in Laravel adapter.",
   "type": "library",
+  "keywords": ["laravel", "claim", "dispatch", "pipeline", "command", "job", "bus"],
+  "version": "0.0.2",
   "license": "MIT",
   "authors": [
     {
