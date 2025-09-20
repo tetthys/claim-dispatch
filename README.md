@@ -36,29 +36,30 @@ php artisan migrate
 
 ### 1. Define a Processor
 
-Processors map `action_logs.type` to a Job.
+Suppose you want to schedule **welcome emails**.
+Each log row with `type = email.welcome` should become a `SendWelcomeEmail` Job.
 
 ```php
 <?php
-// app/Processors/SellerTryProcessor.php
+// app/Processors/WelcomeEmailProcessor.php
 
 namespace App\Processors;
 
 use Tetthys\ClaimDispatch\Contracts\LogProcessorInterface;
 use Tetthys\ClaimDispatch\Contracts\LogRecordInterface;
-use App\Jobs\CheckSellerTry;
+use App\Jobs\SendWelcomeEmail;
 
-final class SellerTryProcessor implements LogProcessorInterface
+final class WelcomeEmailProcessor implements LogProcessorInterface
 {
     public function supports(string $type): bool
     {
-        return $type === 'seller.try';
+        return $type === 'email.welcome';
     }
 
     public function toJob(LogRecordInterface $record): object
     {
         $p = $record->getPayload();
-        return new CheckSellerTry((string) ($p['seller_try_id'] ?? ''));
+        return new SendWelcomeEmail((string) ($p['user_email'] ?? ''));
     }
 }
 ```
@@ -67,7 +68,7 @@ Register it in `config/claim-dispatch.php`:
 
 ```php
 'processors' => [
-    App\Processors\SellerTryProcessor::class,
+    App\Processors\WelcomeEmailProcessor::class,
 ],
 ```
 
@@ -85,34 +86,26 @@ use Tetthys\ClaimDispatch\Contracts\ActionLogPublisherInterface;
 /** @var ActionLogPublisherInterface $publisher */
 $publisher = app(ActionLogPublisherInterface::class);
 
-$publisher->publish(function (\Tetthys\ClaimDispatch\Publishing\Draft $d) use ($sellerTry) {
-    $d->type('seller.try')
-      ->eligibleAt($sellerTry->end_at) // stored in end_at
+$publisher->publish(function (\Tetthys\ClaimDispatch\Publishing\Draft $d) use ($user) {
+    $d->type('email.welcome')
+      ->eligibleAt(now()->addMinutes(5)) // send after 5 minutes
       ->payload([
-          'seller_try_id' => (string) $sellerTry->id,
-          'user_id'       => $sellerTry->user_id,
-          'state'         => $sellerTry->state,
-          'amount'        => (string) $sellerTry->crypto_amount,
+          'user_email' => $user->email,
+          'user_name'  => $user->name,
       ])
-      ->rules([
-          'eq'  => [['path' => 'state',  'value' => 'ready']],
-          'gte' => [['path' => 'amount', 'value' => '0.01']],
-      ])
-      ->idempotency((string) $sellerTry->id);
+      ->idempotency('welcome:' . $user->id);
 });
 ```
 
 #### Quick one-liner
 
 ```php
-$publisher->quick('featured.try', $featuredTry->end_at, [
-    'featured_try_id' => (string) $featuredTry->id,
-    'user_id'         => $featuredTry->user_id,
-], [
-    'rules'       => ['gte' => [['path' => 'slot', 'value' => 1]]],
-    'idempotency' => (string) $featuredTry->id,
-    'when'        => fn (array $p) => !empty($p['featured_try_id']),
-]);
+$publisher->quick(
+    type: 'email.welcome',
+    eligibleAt: now()->addMinutes(5),
+    payload: ['user_email' => $user->email, 'user_name' => $user->name],
+    options: ['idempotency' => 'welcome:' . $user->id]
+);
 ```
 
 ---
@@ -139,10 +132,10 @@ php artisan queue:work
 ## 🧩 How It Works
 
 1. **Publish**
-   Insert a row into `action_logs` with:
+   Insert a row into `action_logs`:
 
-   * `type` = routing key (e.g. `seller.try`)
-   * `payload` = JSON data (IDs, extra fields)
+   * `type` = routing key (e.g. `email.welcome`)
+   * `payload` = JSON data (email address, etc.)
    * `end_at` = earliest eligible time
 
 2. **Scheduler**
@@ -154,18 +147,18 @@ php artisan queue:work
    Jobs must be **idempotent**.
 
 4. **Execution**
-   Queue workers handle the jobs.
+   Queue workers run the jobs.
    After success, the row is marked `processed_at`.
 
 ---
 
 ## ✅ Example Workflow
 
-* A `SellerTry` model is created with an `end_at` deadline.
-* Publisher writes a `seller.try` action log row with its ID.
-* Scheduler claims it when due and dispatches a `CheckSellerTry` job.
-* The job finalizes the attempt, checks deposits, emits events.
-* Safe from duplication even under concurrency.
+* A new user signs up.
+* The app publishes an `email.welcome` log with their email and a 5-minute delay.
+* After 5 minutes, the scheduler claims it and dispatches `SendWelcomeEmail`.
+* The Job sends the email.
+* Even with multiple workers, it is **dispatched exactly once**.
 
 ---
 
@@ -183,7 +176,7 @@ php artisan queue:work
   Prevents duplicate rows for the same logical event.
 
 * **Multiple domains**
-  Just add more processors (`featured.try`, `address.try`, …).
+  Just add more processors (`email.newsletter`, `report.generate`, …).
 
 ---
 
