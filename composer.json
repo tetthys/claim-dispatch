@@ -18,7 +18,8 @@
     "illuminate/support": "^10.0 || ^11.0",
     "illuminate/database": "^10.0 || ^11.0",
     "illuminate/bus": "^10.0 || ^11.0",
-    "illuminate/console": "^10.0 || ^11.0"
+    "illuminate/console": "^10.0 || ^11.0",
+    "pestphp/pest": "4.1.2"
   },
   "autoload": {
     "psr-4": {
@@ -33,5 +34,10 @@
     }
   },
   "minimum-stability": "stable",
-  "prefer-stable": true
+  "prefer-stable": true,
+  "config": {
+    "allow-plugins": {
+      "pestphp/pest-plugin": true
+    }
+  }
 }
